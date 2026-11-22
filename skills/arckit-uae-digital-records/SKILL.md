@@ -1,0 +1,56 @@
+---
+name: arckit-uae-digital-records
+description: "[COMMUNITY] Generate a Digital Records Plan under the UAE Government Services Digital Records Policy. Captures the source-of-truth register per service, retention schedule, and records-as-official-source designation."
+---
+
+> ⚠️ **Community-contributed command** — not part of the officially-maintained ArcKit baseline. Output should be reviewed by qualified DPO / RSSI / federal compliance counsel before reliance. Citations to UAE Cabinet / PDPL / IAS / Cybersecurity Council text may lag the current text — verify against the source.
+
+## User Request
+
+```text
+$ARGUMENTS
+```
+
+You are an enterprise architect generating a Digital Records Plan under the UAE Government Services Digital Records Policy.
+
+## Process
+
+1. Read prerequisites:
+   - `projects/000-global/ARC-000-PRIN-*.md` (federal principles, if present)
+   - The project's REQ (including its `DR-*` requirements), DATA (data model), DIAG (architecture diagrams) and CLAS (UAE Smart Data Classification Register) artefacts (if present)
+   - `.arckit/templates/_partials/RENDERING.md`
+2. Read the template:
+   - **First**, check `.arckit/templates-custom/uae-digital-records-template.md` (user override)
+   - **Then**, `.arckit/templates/uae-digital-records-template.md`
+   - **Fallback**, `.arckit/templates/uae-digital-records-template.md`
+3. Use `bash .arckit/scripts/bash/create-project.sh --json --name "<project-name>"` if the project does not yet exist; otherwise locate it.
+4. Use `node .arckit/scripts/generate-document-id.mjs <PROJECT_ID> DREC {VERSION} --filename` for the artefact filename. Work out `{VERSION}` first with `.arckit/references/version-detection.md`: a re-run writes the next version beside the earlier file, never over it.
+5. Resolve the `<!-- DOC-CONTROL-HEADER -->` marker per `RENDERING.md`.
+6. Generate the following sections:
+   - **Source-of-Truth Register** — for every record type the service produces or consumes, designate the authoritative system, the custodian entity, and a stable record identifier scheme.
+   - **Retention Schedule** — for every record type, state the retention period, the legal/regulatory basis for that period, the disposal trigger, and the disposal method.
+   - **Records-as-Official-Source Designation** — under the Digital Records Policy, digital records (when properly captured, retained, and audit-trailed) are the official source. State which records carry that designation, and what evidence (audit trail, integrity controls, signature) supports it.
+   - **Records Lifecycle** — capture, classification (cross-reference to CLAS register), storage, access, retention, disposal. State where each lifecycle stage is implemented in the technology stack.
+   - **Audit & Disposal procedures** — the operational procedure for periodic audit (sampling, integrity checks) and the controlled disposal procedure (approver, evidence of disposal).
+7. Populate the External References section per `.arckit/references/citation-instructions.md`. The UAE Legislation Platform entry for the Government Services Digital Records Policy and the 23 April 2026 UAE Cabinet meeting announcement MUST appear in the Document Register with their URLs and the verification date.
+8. Before writing the file, read `.arckit/references/quality-checklist.md` and verify all **Common Checks** plus the **DREC** per-type checks pass. Fix any failures before proceeding.
+9. Write the artefact via the Write tool to `projects/<project-id>/<filename>`.
+10. Show only a summary to the user (one paragraph plus the count of records under each lifecycle stage and any retention gaps).
+
+## Authoritative anchor
+
+UAE Government Services Digital Records Policy — approved by the UAE Cabinet on 23 April 2026. Lead entity: Prime Minister's Office. Primary URL (UAE Legislation Platform entry, which names the lead entity): <https://uaelegislation.gov.ae/en/policy/details/government-services-digital-records-policy>. UAE Cabinet announcement: <https://uaecabinet.ae/en/news/under-directives-of-uae-president-and-in-world-first-mohammed-bin-rashid-reveals-new-uae-government-framework-to-deploy-agentic-ai-across-50-of-government-sectors-operations-within-two-years>. The Dubai Media Office carries the same text: <https://mediaoffice.ae/en/news/2026/april/23-04/mohammed-bin-rashid-chairs-uae-cabinet-meeting>
+
+## Important notes
+
+- The UAE Legislation Platform lists the Prime Minister's Office as the policy's lead entity; the Cabinet announcements name no owner. Record the Prime Minister's Office as lead entity, citing the platform entry. Do not attribute the policy to the Ministry of Cabinet Affairs or to the National Library and Archives. The platform entry says the unified reference for each digital record and its responsible entity are approved by Cabinet resolution as official golden sources, and that records and their metadata are documented in a "Records Catalog". Record the responsible entity per record type only when the entity has it in writing (for example, from the Records Catalog), and otherwise list it as an open item for the entity's records or data office.
+- The Cabinet decision designates digital records as the official source — ensure this is reflected explicitly per record type, not merely as a policy aspiration.
+- Retention bases must cite the underlying instrument (federal law, sectoral regulation, internal policy) — do not state retention periods without authority.
+- Records designated as the official source must have an integrity control (hash, WORM, signed audit trail) — flag any record type that cannot evidence integrity.
+
+## Suggested Next Steps
+
+After completing this command, consider running:
+
+- `/arckit-data-model` -- Source-of-truth designations refine entity ownership in the data model.
+- `/arckit-uae-data-sharing` -- Records designated as the official source feed downstream data-sharing agreements.

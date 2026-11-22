@@ -1,0 +1,99 @@
+---
+name: arckit-us-ai-rmf
+description: "[COMMUNITY] Conduct a NIST AI Risk Management Framework 1.0 assessment (Govern / Map / Measure / Manage) of an AI system, including the Generative AI Profile (NIST AI 600-1) where applicable."
+---
+
+> ⚠️ **Community-contributed command** — not part of the officially-maintained ArcKit baseline.
+> Output should be reviewed by qualified US federal counsel, your agency's Senior Agency Official
+> for Privacy (SAOP), CISO, Chief AI Officer (CAIO), and (for FedRAMP matters) the agency PMO
+> and 3PAO before reliance.
+>
+> **Statutory currency**: EO 14110 was **revoked January 2025**; the active AI assurance mandates
+> are **OMB M-25-21** (use and governance of AI; it rescinded and replaced M-24-10 on 3 April 2025)
+> and **OMB M-25-22** (acquisition of AI; it replaced M-24-18). FedRAMP completed the
+> transition to NIST 800-53 **Rev 5** baselines in 2024 — Rev 4 references are deprecated. Verify
+> all citations against the current Federal Register, OMB Circulars page, NIST publications, and
+> FedRAMP.gov before relying on this output.
+
+You are an enterprise architect conducting a **NIST AI Risk Management Framework (AI RMF) 1.0** assessment of an AI / ML system used by a US federal civilian agency.
+
+## User Input
+
+```text
+$ARGUMENTS
+```
+
+## Context
+
+The NIST AI RMF 1.0 (January 2023) provides a voluntary, rights-preserving, sector-agnostic framework for managing risks to individuals, organisations, and society from AI systems. It defines four core functions — **Govern**, **Map**, **Measure**, **Manage** — each broken into categories and subcategories with associated outcomes. The AI RMF Playbook publishes suggested actions per subcategory.
+
+The **Generative AI Profile (NIST AI 600-1, July 2024)** is a cross-sectoral profile that enumerates twelve distinct GenAI risks and maps each to AI RMF actions. Use the GenAI Profile additionally for any system containing generative components.
+
+The AI RMF is voluntary. OMB M-25-21 (agency use of AI) and OMB M-25-22 (AI acquisition) do not mention it; M-24-10, which M-25-21 rescinded and replaced, only encouraged agencies to draw on it. ArcKit uses the AI RMF to structure the evidence that the M-25-21 minimum practices and AI impact assessment need, and the GenAI Profile for generative risks. NIST is revising AI RMF 1.0 under the July 2025 AI Action Plan; check the NIST page for a newer version before relying on 1.0.
+
+**Authoritative anchors**:
+
+- NIST AI Risk Management Framework 1.0 — <https://www.nist.gov/itl/ai-risk-management-framework>
+- NIST AI RMF 1.0 PDF — <https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf>
+- NIST AI RMF Playbook — <https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook>
+- NIST AI 600-1 (Artificial Intelligence Risk Management Framework: Generative AI Profile) — <https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf>
+- NIST AI 100-2 E2023 (Adversarial Machine Learning: A Taxonomy and Terminology of Attacks and Mitigations) — <https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-2e2023.pdf>
+
+## Process
+
+1. Read prerequisites:
+   - `projects/000-global/ARC-000-PRIN-*.md` (architecture principles, if present)
+   - The project's REQ artefact — extract `DR-*` (data requirements, especially training/inference data), `NFR-SEC-*`, `NFR-FAIR` (fairness if defined), `INT-*`
+   - The project's DATA / data-model artefact — for training-data lineage, PII presence, sensitive attributes
+   - The project's STKE artefact — for affected populations and decision-impact analysis
+   - Any model cards, datasheets, or vendor model documentation under `projects/<id>/external/` or `projects/<id>/vendors/`
+   - `.arckit/templates/_partials/RENDERING.md`
+
+2. Read the template:
+   - **First**, check `.arckit/templates-custom/us-ai-rmf-template.md` (user override)
+   - **Then**, `.arckit/templates/us-ai-rmf-template.md`
+   - **Fallback**, `.arckit/templates/us-ai-rmf-template.md`
+
+3. Use `bash .arckit/scripts/bash/create-project.sh --json --name "<project-name>"` if the project does not yet exist; otherwise locate it.
+
+4. Use `node .arckit/scripts/generate-document-id.mjs <PROJECT_ID> AIRMF {VERSION} --filename` for the artefact filename. The type code for this command is `AIRMF`. Work out `{VERSION}` first with `.arckit/references/version-detection.md`: a re-run writes the next version beside the earlier file, never over it.
+
+5. Resolve the `<!-- DOC-CONTROL-HEADER -->` marker per `RENDERING.md` before writing the artefact. `RENDERING.md` hard-routes the US regime to `_partials/document-control-us.md`, which already carries the EO 13526 / 32 CFR Part 2002 marking ladder — no per-command classification override is needed.
+
+6. Generate the following sections:
+
+   - **AI System Description** — purpose, mission served, model type (classification / regression / generative / agentic / RL), training/fine-tuning regime, inference deployment pattern, human-in-the-loop posture, scale (users, decisions/day), and life-cycle stage (research / pilot / production / sunset).
+   - **AI System Lifecycle and Actors** — which stages of the AI lifecycle (per AI RMF §3) are in scope (Plan & Design, Collect & Process Data, Build & Use Model, Verify & Validate, Deploy & Use, Operate & Monitor); identify Test, Evaluation, Verification, and Validation (TEVV) responsibilities.
+   - **Govern Function Assessment** — for each Govern subcategory (Govern 1.1–1.7, 2.1–2.3, 3.1–3.2, 4.1–4.3, 5.1–5.2, 6.1–6.2) record: outcome statement, current state, evidence, gap actions. Document policies, accountability mechanisms, diverse-perspective inclusion, supply-chain accountability.
+   - **Map Function Assessment** — Map 1–5 categories: AI context (Map 1), categorisation of the system (Map 2), risks/benefits (Map 3), risks of third-party components (Map 4), impacts on affected populations (Map 5). Build the impact-analysis matrix here.
+   - **Measure Function Assessment** — Measure 1–4 categories: select metrics and methodologies for trustworthiness characteristics (valid & reliable, safe, secure & resilient, accountable & transparent, explainable & interpretable, privacy-enhanced, fair with harmful bias managed). Document test methods (offline metrics, online A/B, red-teaming) and frequency.
+   - **Manage Function Assessment** — Manage 1–4 categories: prioritisation of risks, decision criteria for deploy / withdraw, third-party risk management, ongoing monitoring (drift, performance, fairness), incident response. Cross-reference the IR controls in the NIST 800-53 artefact.
+   - **Generative AI Profile Addendum (NIST AI 600-1)** — required if the system uses generative AI (LLM, diffusion, multi-modal generative). Assess against the 12 GenAI risks: (1) CBRN information or capabilities; (2) Confabulation; (3) Dangerous, violent, or hateful content; (4) Data privacy; (5) Environmental impacts; (6) Harmful bias and homogenisation; (7) Human-AI configuration; (8) Information integrity; (9) Information security; (10) Intellectual property; (11) Obscene, degrading, or abusive content; (12) Value chain and component integration. For each risk: applicability, current controls, residual risk, action items.
+   - **Residual Risk Register** — risks remaining after Manage actions, prioritised; each linked to a target review date.
+   - **Control Crosswalk** — table mapping AI RMF subcategories to NIST 800-53 Rev 5 controls and to the OMB M-25-21 §4(b) minimum practices, so the assurance posture is traceable.
+
+7. Before writing the file, read `.arckit/references/quality-checklist.md` and verify all **Common Checks** plus the **AIRMF** per-type checks pass. Fix any failures before proceeding.
+8. Use the Write tool to save the artefact at the path returned by `create-project.sh` + `generate-document-id.mjs`.
+
+9. Emit a short summary to the user — AI system type, GenAI in scope (Y/N), top 5 residual risks, M-25-21 high-impact hint (high-impact / not high-impact), and CAIO review status. Do not echo the full artefact.
+
+## Handoffs
+
+The RMF findings drive `/arckit-us-ai-impact` — the M-25-21 high-impact determination and minimum practices, and the M-25-22 acquisition terms, inherit the RMF risk register. PII-handling AI systems require `/arckit-us-privacy-pia`. Residual risks flow into `/arckit-risk`. Significant model, hosting, data-governance, and human-oversight decisions captured during the RMF process should be recorded as ADRs via `/arckit-adr`.
+
+## Important Notes
+
+- **The AI RMF is voluntary** — neither OMB M-25-21 nor M-25-22 requires it, and M-24-10 (now rescinded) only encouraged it. Use it because it gives a structured evidence base for the M-25-21 minimum practices (testing, impact assessment, monitoring, oversight), not because a memo mandates it. An agency's own AI policy may adopt it; record that policy as the source where it does.
+- **EO 14110 is revoked** — January 2025. Do not cite EO 14110 as the source of GenAI policy. The active anchors are OMB M-25-21, OMB M-25-22, and NIST AI 600-1.
+- **Govern is a precondition, not a parallel track** — Map / Measure / Manage cannot satisfy their outcomes if the Govern function is weak. Score Govern honestly even where mission urgency tempts shortcutting.
+- **GenAI Profile is additive, not replacement** — for systems with generative components, run both the full AI RMF and the AI 600-1 Profile. The Profile adds risks not surfaced by the base RMF (confabulation, value-chain integration, information integrity).
+- **Adversarial ML is now in scope** — NIST AI 100-2 E2023 catalogues evasion, poisoning, extraction, and inference attacks. Measure-function security testing must include adversarial-ML threat modelling, not just traditional infosec testing.
+
+## Suggested Next Steps
+
+After completing this command, consider running:
+
+- `/arckit-us-ai-impact` -- Translate AI RMF findings into the M-25-21 high-impact determination and minimum practices, and the M-25-22 acquisition terms.
+- `/arckit-us-privacy-pia` -- AI systems trained on or inferencing over PII require an E-Gov Act §208 PIA; the AI RMF data inventory seeds the PIA.
+- `/arckit-risk` -- Residual AI risks (confabulation, bias, security, value-chain) flow into the project risk register.
+- `/arckit-adr` -- Model architecture, hosting, data-governance, and human-oversight decisions made during the RMF process warrant ADRs.

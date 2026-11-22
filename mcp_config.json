@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "aws-knowledge": {
+      "url": "https://knowledge-mcp.global.api.aws"
+    },
+    "microsoft-learn": {
+      "url": "https://learn.microsoft.com/api/mcp"
+    },
+    "govreposcrape": {
+      "url": "https://govreposcrape-api-1060386346356.us-central1.run.app/mcp"
+    },
+    "uk-tenders": {
+      "url": "https://tenders.run.cns.me/mcp"
+    },
+    "trello": {
+      "url": "https://mcp.trello.com/v1"
+    }
+  }
+}

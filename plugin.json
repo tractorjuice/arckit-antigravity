@@ -1,0 +1,27 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "arckit",
+  "displayName": "ArcKit",
+  "version": "6.25.0",
+  "description": "Enterprise architecture governance: commands that draft requirements, business cases, design reviews and UK government assessments from templates.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "/arckit-start",
+    "/arckit-requirements Build a payment processing system",
+    "/arckit-navigator"
+  ],
+  "author": {
+    "name": "ArcKit",
+    "url": "https://arckit.org"
+  },
+  "homepage": "https://arckit.org",
+  "repository": "https://github.com/tractorjuice/arckit-antigravity",
+  "license": "MIT AND CC-BY-SA-4.0",
+  "keywords": [
+    "enterprise-architecture",
+    "governance",
+    "procurement",
+    "public-sector",
+    "uk-government"
+  ]
+}
