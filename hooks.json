@@ -1,0 +1,40 @@
+{
+  "arckit-gates": {
+    "PreToolUse": [
+      {
+        "matcher": "write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-hook.mjs pre validate-arc-filename file-protection secret-file-scanner",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-hook.mjs pre file-protection secret-file-scanner",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "arckit-manifest": {
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-hook.mjs post update-manifest",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

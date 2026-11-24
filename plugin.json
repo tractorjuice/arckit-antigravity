@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "arckit",
   "displayName": "ArcKit",
-  "version": "6.25.0",
+  "version": "6.26.0",
   "description": "Enterprise architecture governance: commands that draft requirements, business cases, design reviews and UK government assessments from templates.",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [

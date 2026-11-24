@@ -1,0 +1,572 @@
+/**
+ * ArcKit Hook Utilities — Shared module for all hooks
+ *
+ * Extracts common file-system helpers, repo discovery, doc-type parsing,
+ * metadata extraction, and stdin/JSON parsing so each hook can import
+ * them instead of copy-pasting ~80 lines of identical code.
+ *
+ * Issue #98: "Reusable utilities could be extracted into a shared
+ * hook-utils.mjs module as the hook count grows."
+ */
+
+import { lstatSync, readFileSync, statSync, readdirSync, writeSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { DOC_TYPES } from '../config/doc-types.mjs';
+
+// ── File System ──
+
+export function isDir(p) {
+  try { return statSync(p).isDirectory(); } catch { return false; }
+}
+
+export function isFile(p) {
+  try { return statSync(p).isFile(); } catch { return false; }
+}
+
+export function readText(p) {
+  try { return readFileSync(p, 'utf8'); } catch { return null; }
+}
+
+export function listDir(p) {
+  try { return readdirSync(p).sort(); } catch { return []; }
+}
+
+const MAX_WALK_DEPTH = 16;
+const MAX_WALK_ENTRIES = 2000;
+
+function walkEntries(rootDir, onDirectory, onFile) {
+  // The root itself may be a symlink (a project's external/ pointing at a
+  // shared folder); follow it. Entries below it are not followed.
+  let rootStat;
+  try { rootStat = statSync(rootDir); } catch { return; }
+  if (!rootStat.isDirectory()) return;
+
+  const visited = new Set();
+  let entries = 0;
+
+  function walk(dir, parts, depth, stat) {
+    const identity = `${stat.dev}:${stat.ino}`;
+    if (visited.has(identity)) return;
+    visited.add(identity);
+    onDirectory(dir);
+
+    for (const entry of listDir(dir)) {
+      if (entries >= MAX_WALK_ENTRIES) break;
+      entries++;
+
+      const fullPath = join(dir, entry);
+      let entryStat;
+      try { entryStat = lstatSync(fullPath); } catch { continue; }
+      if (entryStat.isSymbolicLink()) continue;
+
+      const nextParts = [...parts, entry];
+      if (entryStat.isDirectory() && depth < MAX_WALK_DEPTH) {
+        walk(fullPath, nextParts, depth + 1, entryStat);
+      } else if (entryStat.isFile()) {
+        onFile(entry, fullPath, nextParts);
+      }
+    }
+  }
+
+  walk(rootDir, [], 0, rootStat);
+}
+
+export function listFilesRecursive(rootDir) {
+  const files = [];
+  walkEntries(rootDir, () => {}, (name, path, parts) => {
+    files.push({ name, path, relativePath: parts.join('/') });
+  });
+  return files;
+}
+
+export function listDirsRecursive(rootDir) {
+  const dirs = [];
+  walkEntries(rootDir, dir => dirs.push(dir), () => {});
+  return dirs;
+}
+
+export function mtimeMs(p) {
+  try { return statSync(p).mtimeMs; } catch { return 0; }
+}
+
+// ── Repository Discovery ──
+
+export function findRepoRoot(cwd) {
+  let current = resolve(cwd);
+  while (true) {
+    if (isArcKitProjectsDir(join(current, 'projects'))) return current;
+    const parent = resolve(current, '..');
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+function isArcKitProjectsDir(projectsDir) {
+  if (!isDir(projectsDir)) return false;
+  return listDir(projectsDir).some((entry) => /^\d{3}(?:-|$)/.test(entry));
+}
+
+// ── Overlay Plugins ──
+
+const OVERLAY_NAME_RE = /^arckit-[a-z0-9-]+$/;
+
+function isWithin(child, parent) {
+  const rel = relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+function pluginName(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, '.claude-plugin', 'plugin.json'), 'utf8')).name;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `docs/guides/` folders of the ArcKit overlays available to this repo.
+ * Each overlay ships the guides for its own commands; core ships only core's,
+ * so /arckit:pages lists an overlay's guides only when that overlay is here.
+ *
+ * Two sources, the first found winning for each overlay:
+ *  - Folders beside the core plugin: the source checkout, where core and the
+ *    overlays sit side by side under plugins/ and load with --plugin-dir. In
+ *    the plugin cache the folders beside core are its other versions, all
+ *    named `arckit`, so this finds nothing there.
+ *  - Claude Code's plugins/installed_plugins.json: every installed `arckit-*`
+ *    plugin installed for the user or for this repo (or a folder above it).
+ *    A repo-scoped install wins over a user-scoped one.
+ *
+ * @param {string} pluginRoot - the core plugin's folder (CLAUDE_PLUGIN_ROOT)
+ * @param {string} repoRoot - the repo /arckit:pages runs in
+ * @param {object} env - process.env, or a stand-in in tests
+ * @returns {string[]} existing guide folders, sorted by overlay name
+ */
+export function overlayGuideDirs(pluginRoot, repoRoot, env = process.env) {
+  const found = new Map();
+
+  const core = resolve(pluginRoot);
+  const parent = dirname(core);
+  for (const entry of listDir(parent)) {
+    const dir = join(parent, entry);
+    if (dir === core) continue;
+    const name = pluginName(dir);
+    if (name && OVERLAY_NAME_RE.test(name) && !found.has(name)) found.set(name, dir);
+  }
+
+  const configDir = env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), '.claude');
+  let plugins = {};
+  try {
+    plugins = JSON.parse(readFileSync(join(configDir, 'plugins', 'installed_plugins.json'), 'utf8')).plugins || {};
+  } catch {
+    plugins = {};
+  }
+  const repo = resolve(repoRoot);
+  const installed = new Map();
+  for (const [key, installs] of Object.entries(plugins)) {
+    const name = key.split('@')[0];
+    if (!OVERLAY_NAME_RE.test(name) || found.has(name)) continue;
+    for (const install of Array.isArray(installs) ? installs : [installs]) {
+      if (!install || typeof install.installPath !== 'string') continue;
+      if (install.projectPath) {
+        if (isWithin(repo, resolve(install.projectPath))) installed.set(name, install.installPath);
+      } else if (!installed.has(name)) {
+        installed.set(name, install.installPath);
+      }
+    }
+  }
+  for (const [name, dir] of installed) found.set(name, dir);
+
+  return [...found.keys()]
+    .sort()
+    .map((name) => join(found.get(name), 'docs', 'guides'))
+    .filter((dir) => isDir(dir));
+}
+
+// ── Doc Type Extraction ──
+
+// Derive compound types from DOC_TYPES config instead of hardcoding
+const COMPOUND_TYPES = Object.keys(DOC_TYPES).filter(k => k.includes('-'));
+
+export function extractDocType(filename) {
+  const m = filename.match(/^ARC-\d{3}-(.+)-v\d+(\.\d+)?\.md$/);
+  if (!m) return null;
+  let rest = m[1];
+
+  // Try compound types first (e.g. SECD-MOD, PRIN-COMP)
+  for (const code of COMPOUND_TYPES) {
+    if (rest.startsWith(code)) return code;
+  }
+
+  // Strip trailing -NNN for multi-instance types (ADR-001, DIAG-002)
+  rest = rest.replace(/-\d{3}$/, '');
+  return rest;
+}
+
+export function extractVersion(filename) {
+  const m = filename.match(/-v(\d+(?:\.\d+)?)\.md$/);
+  return m ? m[1] : null;
+}
+
+// ── Metadata Extraction ──
+
+const DOC_CONTROL_RE = /^\|\s*\*\*([^*]+)\*\*\s*\|\s*(.+?)\s*\|/;
+// Accept 1-3 digit IDs so cross-references in non-REQ artifacts (e.g.
+// "Relates To: BR-1, FR-3" in an RSCH/RISK/STKE/SOBC) populate node.reqIds
+// even when the REQ document uses non-padded IDs. Cross-namespace collisions
+// (e.g. Azure Security Benchmark "Backup & Recovery" historically used BR-1)
+// are handled by renaming the colliding IDs in the colliding templates rather
+// than constraining the scanner — see arckit-claude/templates/azure-research-template.md.
+const REQ_ID_PATTERN = /\b(BR-\d{1,3}|FR-\d{1,3}|NFR-[A-Z]+-\d{1,3}|NFR-\d{1,3}|INT-\d{1,3}|DR-\d{1,3})\b/g;
+
+export function extractDocControlFields(content) {
+  const fields = {};
+  for (const line of content.split('\n')) {
+    const m = line.match(DOC_CONTROL_RE);
+    if (m) {
+      fields[m[1].trim()] = m[2].trim();
+    }
+  }
+  return fields;
+}
+
+export function extractRequirementIds(content) {
+  const ids = new Set();
+  let m;
+  const re = new RegExp(REQ_ID_PATTERN.source, 'g');
+  while ((m = re.exec(content)) !== null) {
+    ids.add(m[1]);
+  }
+  return ids;
+}
+
+// ── Requirement Detail Extraction ──
+
+/** MoSCoW priorities a requirement can carry, in reporting order. */
+export const REQUIREMENT_PRIORITIES = ['MUST_HAVE', 'SHOULD_HAVE', 'COULD_HAVE', 'WONT_HAVE', 'UNSPECIFIED'];
+
+const MOSCOW = { m: 'MUST_HAVE', s: 'SHOULD_HAVE', c: 'COULD_HAVE', w: 'WONT_HAVE' };
+
+/**
+ * Read a MoSCoW priority from the value of a Priority field: "MUST_HAVE",
+ * "Must Have", "Won't Have", "M", or the older MUST/SHOULD/MAY words (MAY
+ * reads as COULD_HAVE). Anything else, including an unfilled
+ * "[MUST_HAVE | ...]" placeholder, returns null.
+ */
+function parsePriorityValue(value) {
+  const m = value.trim().match(/^(must|should|could|won['’]?t|may|[mscw])(?:[\s_-]*have)?\b/i);
+  if (!m) return null;
+  const word = m[1].toLowerCase();
+  return word === 'may' ? MOSCOW.c : MOSCOW[word[0]];
+}
+
+/**
+ * Parse requirement headings and details from a REQ document.
+ * Looks for ### ID: Description headings and priority markers.
+ * Returns array of { id, category, description, priority }, where priority
+ * is one of REQUIREMENT_PRIORITIES.
+ */
+export function extractRequirementDetails(content) {
+  const requirements = [];
+  const lines = content.split('\n');
+
+  // Map prefix to category
+  const categoryMap = {
+    'BR': 'Business',
+    'FR': 'Functional',
+    'NFR': 'Non-Functional',
+    'INT': 'Integration',
+    'DR': 'Data',
+  };
+
+  // Pattern for requirement headings: ### or #### BR-001: Description text
+  // Template uses ### for BR, #### for FR/NFR/INT/DR — match both levels
+  const headingRe = /^#{3,4}\s+((?:BR|FR|NFR(?:-[A-Z]+)?|INT|DR)-\d{1,3}):\s*(.+)/;
+  // A Priority field: "**Priority**: MUST_HAVE", "**Priority:** Must Have"
+  // or a "| Priority | MUST |" table row
+  const priorityFieldRe = /^\s*(?:[-*]\s+)?\|?\s*\*{0,2}Priority\*{0,2}\s*(?::\*{0,2}|\|)\s*\*{0,2}\s*(.+)$/i;
+  // Older REQ files with no Priority field: a bare MUST/SHOULD/MAY near the heading
+  const legacyPriorityRe = /\b(MUST|SHOULD|MAY)\b/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const headingMatch = lines[i].match(headingRe);
+    if (!headingMatch) continue;
+
+    const id = headingMatch[1];
+    const description = headingMatch[2].trim();
+
+    // Determine category from prefix
+    let category = 'Unknown';
+    for (const [prefix, cat] of Object.entries(categoryMap)) {
+      if (id.startsWith(prefix)) {
+        category = cat;
+        break;
+      }
+    }
+
+    // The template puts the Priority field 11 to 28 lines below the heading,
+    // so read the whole block, up to the next h2, h3 or h4
+    let priority = null;
+    let legacy = null;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (/^#{2,4}\s+/.test(lines[j])) break;
+      const field = lines[j].match(priorityFieldRe);
+      if (field) {
+        priority = parsePriorityValue(field[1]);
+        if (priority) break;
+      }
+      if (!legacy && j <= i + 10) {
+        const word = lines[j].match(legacyPriorityRe);
+        if (word) legacy = parsePriorityValue(word[1]);
+      }
+    }
+    priority = priority || legacy || 'UNSPECIFIED';
+
+    requirements.push({ id, category, description, priority });
+  }
+
+  // Merge: also extract IDs via regex to catch requirements not under headings
+  // (e.g. table rows, inline references, or unexpected heading levels)
+  const headingIds = new Set(requirements.map(r => r.id));
+  const allIds = extractRequirementIds(content);
+  for (const id of allIds) {
+    if (headingIds.has(id)) continue; // already captured via heading
+    let category = 'Unknown';
+    for (const [prefix, cat] of Object.entries(categoryMap)) {
+      if (id.startsWith(prefix)) {
+        category = cat;
+        break;
+      }
+    }
+    requirements.push({ id, category, description: '(extracted from content)', priority: 'UNSPECIFIED' });
+  }
+
+  return requirements;
+}
+
+// ── Principles Extraction ──
+
+/**
+ * Parse PRIN files for principle entries.
+ * Extracts principle number, title, category, statement, and validation gate counts.
+ * Returns array of { id, title, category, statement, gateCount, gatesPassed }
+ */
+export function extractPrinciples(content) {
+  const principles = [];
+  const lines = content.split('\n');
+
+  let currentCategory = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    // Category headings: ## N. Category Principles
+    const catMatch = lines[i].match(/^##\s+\d+\.\s+(.+?)\s*Principles?\s*$/i);
+    if (catMatch) {
+      currentCategory = catMatch[1].trim();
+      continue;
+    }
+
+    // Principle headings: ### N. Title
+    const prinMatch = lines[i].match(/^###\s+(\d+)\.\s+(.+)/);
+    if (!prinMatch) continue;
+
+    const id = prinMatch[1];
+    const title = prinMatch[2].trim();
+
+    // Extract principle statement from **Principle Statement**: blocks in next ~15 lines
+    let statement = '';
+    let gateCount = 0;
+    let gatesPassed = 0;
+
+    for (let j = i + 1; j < Math.min(i + 40, lines.length); j++) {
+      // Stop if we hit another h2 or h3
+      if (/^#{2,3}\s+/.test(lines[j])) break;
+
+      // Principle statement
+      const stmtMatch = lines[j].match(/\*\*Principle Statement\*\*:\s*(.+)/i);
+      if (stmtMatch) {
+        statement = stmtMatch[1].trim();
+      }
+
+      // Count validation gates (checked [x] and unchecked [ ])
+      if (/\[x\]/i.test(lines[j])) {
+        gateCount = gateCount + 1;
+        gatesPassed = gatesPassed + 1;
+      } else if (/\[\s\]/.test(lines[j])) {
+        gateCount = gateCount + 1;
+      }
+    }
+
+    principles.push({ id, title, category: currentCategory, statement, gateCount, gatesPassed });
+  }
+
+  return principles;
+}
+
+// ── Risk Entry Extraction ──
+
+/**
+ * Parse RISK files for risk entries.
+ * Extracts from ranked table rows and fallback heading format.
+ * Returns array of { id, title, category, inherent, residual, owner, status, response }
+ */
+export function extractRiskEntries(content) {
+  const risks = [];
+  const seenIds = new Set();
+  const lines = content.split('\n');
+
+  // Try table rows first: | R-NNN | Title | Category | ... |
+  const tableRe = /^\|\s*(R-\d{3})\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|/;
+  for (const line of lines) {
+    const m = line.match(tableRe);
+    if (!m) continue;
+    // Skip header rows
+    if (m[1] === 'R-NNN' || /^-+$/.test(m[2].trim())) continue;
+    if (seenIds.has(m[1])) continue;
+    seenIds.add(m[1]);
+    risks.push({
+      id: m[1],
+      title: m[2].trim(),
+      category: m[3].trim(),
+      inherent: m[4].trim(),
+      residual: m[5].trim(),
+      owner: m[6].trim(),
+      status: m[7].trim(),
+      response: m[8].trim(),
+    });
+  }
+
+  // Fallback: ### Risk R-001: Title headings
+  const headingRe = /^###\s+Risk\s+(R-\d{3}):\s*(.+)/i;
+  for (let i = 0; i < lines.length; i++) {
+    const hm = lines[i].match(headingRe);
+    if (!hm || seenIds.has(hm[1])) continue;
+    seenIds.add(hm[1]);
+
+    // Scan next ~15 lines for metadata
+    let category = '', inherent = '', residual = '', owner = '', status = '', response = '';
+    for (let j = i + 1; j < Math.min(i + 16, lines.length); j++) {
+      if (/^#{2,3}\s+/.test(lines[j])) break;
+      const kvMatch = lines[j].match(/\*\*(.+?)\*\*:\s*(.+)/);
+      if (!kvMatch) continue;
+      const key = kvMatch[1].toLowerCase();
+      const val = kvMatch[2].trim();
+      if (key.includes('category')) category = val;
+      else if (key.includes('inherent')) inherent = val;
+      else if (key.includes('residual')) residual = val;
+      else if (key.includes('owner')) owner = val;
+      else if (key.includes('status')) status = val;
+      else if (key.includes('response')) response = val;
+    }
+
+    risks.push({ id: hm[1], title: hm[2].trim(), category, inherent, residual, owner, status, response });
+  }
+
+  return risks;
+}
+
+// ── Hook Output ──
+
+/**
+ * Emit a PostToolUse `hookSpecificOutput.updatedToolOutput` payload to stdout.
+ * Replaces the tool output the model sees with our string. Use this when the
+ * hook actually did something the model should know about (e.g. stamped a
+ * file, updated a manifest); stay silent (do not call this) when the hook
+ * was a no-op so the original tool output is preserved.
+ *
+ * Available since Claude Code v2.1.121 for all tools (was Bash-only before).
+ * When multiple PostToolUse hooks emit on the same tool call, the last hook's
+ * payload wins — so a downstream hook must include any signal earlier hooks
+ * needed to surface.
+ *
+ * @param {string} text - The string to present to the model as the tool output.
+ */
+export function emitUpdatedToolOutput(text) {
+  const payload = {
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse',
+      updatedToolOutput: text,
+    },
+  };
+  writeSync(1, JSON.stringify(payload));
+}
+
+// ── Hook Input ──
+
+/**
+ * Read stdin and parse as JSON. Exits the process silently on any failure
+ * (empty stdin, invalid JSON). This consolidates the 12-line pattern that
+ * every hook repeats.
+ *
+ * @returns {object} Parsed hook input data
+ */
+export function parseHookInput() {
+  let raw = '';
+  try {
+    raw = readFileSync(0, 'utf8');
+  } catch {
+    process.exit(0);
+  }
+  if (!raw || !raw.trim()) process.exit(0);
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    process.exit(0);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) process.exit(0);
+  return data;
+}
+
+/**
+ * True when the module at this URL is the script Node was asked to run.
+ *
+ * Compares real paths. `import.meta.url` is always one and `process.argv[1]`
+ * isn't, so through a symlinked plugin folder a plain comparison is false and
+ * a hook does nothing and exits 0, which Claude Code reads as success.
+ *
+ * @param {string} moduleUrl `import.meta.url`
+ * @returns {boolean}
+ */
+export function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+// ── Version helpers ──
+
+/**
+ * Extract a semver (major.minor.patch) from arbitrary text such as
+ * `claude --version` output or a `CLAUDE_CODE_VERSION` value.
+ *
+ * @param {string|null|undefined} text
+ * @returns {string|null} the matched version, or null when none present
+ */
+export function parseVersion(text) {
+  const match = /(\d+\.\d+\.\d+)/.exec(text || '');
+  return match ? match[1] : null;
+}
+
+/**
+ * Compare two semver strings (major.minor.patch). Missing components count
+ * as 0, so `2.1` equals `2.1.0`.
+ *
+ * @returns {number} > 0 if a > b, < 0 if a < b, 0 if equal
+ */
+export function compareVersions(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const va = pa[i] || 0;
+    const vb = pb[i] || 0;
+    if (va !== vb) return va - vb;
+  }
+  return 0;
+}
